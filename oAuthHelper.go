@@ -20,6 +20,7 @@ package oauthhelper
  ******************************************************************************/
 import (
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -90,6 +91,11 @@ type PingResponse struct {
 	ExpiresIn   string `json:"expires_in"`
 }
 
+// Resp user info response there is way more in here but I just want these security groups
+type UserInfoResp struct {
+	MemberOf []string `json:"memberOf"`
+}
+
 // GetMyAccessToken returns myAccessToken
 /*******************************************************************************
  *	oauthhelper.GetMyAccessToken() (AccessToken string)
@@ -139,6 +145,7 @@ func getPingAccessToken(o *Oauthhelper) (string, int64, error) {
 			Timeout: 5 * time.Second,
 		}).Dial,
 		TLSHandshakeTimeout: 5 * time.Second,
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	// create a http client with timeout settings and the network transport
@@ -213,6 +220,7 @@ func getSigningCert(o *Oauthhelper, keyid string) ([]byte, error) {
 			Timeout: 5 * time.Second,
 		}).Dial,
 		TLSHandshakeTimeout: 5 * time.Second,
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	// create a http client with timeout settings and the network transport
@@ -349,7 +357,7 @@ func (o *Oauthhelper) GetUserInfo(authHdr string) ([]string, error) {
 	var err error
 	var u Users
 	var ok bool
-	var memberOf []string
+	var PingUserInfo UserInfoResp
 
 	if !purgeRunning {
 		purgeRunning = true
@@ -373,6 +381,7 @@ func (o *Oauthhelper) GetUserInfo(authHdr string) ([]string, error) {
 				Timeout: 5 * time.Second,
 			}).Dial,
 			TLSHandshakeTimeout: 5 * time.Second,
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		}
 
 		// create a http client with timeout settings and the network transport
@@ -404,20 +413,18 @@ func (o *Oauthhelper) GetUserInfo(authHdr string) ([]string, error) {
 			log.Printf("Error communicating with Ping while reading userInfo: %v\n", err.Error())
 			return nil, err
 		}
-		log.Printf("userInfo from Ping: %v\n", string(body))
 		u.userInfo = body
 		u.accessed = time.Now().Unix()
 		o.Lock()
-		o.MyUsers[authHdr] = u // add to cache
+		o.MyUsers[authHdr] = u // add or update cache
 		o.Unlock()
 	}
-
-	err = json.Unmarshal(body, &memberOf)
+	err = json.Unmarshal(body, &PingUserInfo)
 	if err != nil {
 		log.Printf("Error parsing security groups from userInfo: %v\n", err)
 		return nil, err
 	}
-	return memberOf, nil
+	return PingUserInfo.MemberOf, nil
 }
 
 func purgeCache(o *Oauthhelper) {
